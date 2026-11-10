@@ -1,0 +1,65 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: skillswap-ingress
+  namespace: skillswap
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    
+    # WebSocket and sticky session support for Socket.io signaling
+    nginx.ingress.kubernetes.io/websocket-services: "skillswap-backend"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "SS_STICKY_ROUTE"
+    nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "172800"
+spec:
+  tls:
+    - hosts:
+        - skillswap.example.com
+      secretName: skillswap-tls-cert
+  rules:
+    - host: skillswap.example.com
+      http:
+        paths:
+          # WebRTC Signaling & Socket.io traffic
+          - path: /socket.io
+            pathType: Prefix
+            backend:
+              service:
+                name: skillswap-backend
+                port:
+                  number: 5000
+
+          # REST API endpoints
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: skillswap-backend
+                port:
+                  number: 5000
+
+          # Prometheus metrics (internal ingress restriction recommended)
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: skillswap-backend
+                port:
+                  number: 5000
+
+          # React SPA Frontend
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: skillswap-frontend
+                port:
+                  number: 80
+

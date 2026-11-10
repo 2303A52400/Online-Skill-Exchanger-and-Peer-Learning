@@ -1,0 +1,326 @@
+// Production Database Schema for SkillSwap
+// Database: PostgreSQL with Prisma ORM
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+// ---------------------------------------------------------
+// ENUMS
+// ---------------------------------------------------------
+
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum ProficiencyLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
+enum SessionStatus {
+  REQUESTED
+  CONFIRMED
+  ESCROWED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DISPUTED
+  REFUNDED
+}
+
+enum TransactionType {
+  DEPOSIT_BONUS       // Platform onboarding bonus
+  ESCROW_LOCK         // Credits locked prior to session start
+  ESCROW_RELEASE      // Credits transferred to teacher on session completion
+  ESCROW_REFUND       // Credits refunded back to learner upon cancellation/dispute
+  DIRECT_SWAP_CREDIT  // Zero-credit reciprocal swap accounting offset
+  ADMIN_ADJUSTMENT    // Resolution adjustment by admin
+}
+
+enum LedgerEntryType {
+  DEBIT
+  CREDIT
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED_REFUND
+  RESOLVED_SPLIT
+  RESOLVED_DISMISSED
+}
+
+// ---------------------------------------------------------
+// USER & AUTHENTICATION
+// ---------------------------------------------------------
+
+model User {
+  id                   String              @id @default(uuid()) @db.Uuid
+  email                String              @unique @db.VarChar(255)
+  passwordHash         String?             @db.VarChar(255) // Optional if OAuth2-only
+  fullName             String              @db.VarChar(120)
+  headline             String?             @db.VarChar(200)
+  bio                  String?             @db.Text
+  avatarUrl            String?             @db.VarChar(512)
+  timeZone             String              @default("UTC") @db.VarChar(64)
+  role                 UserRole            @default(USER)
+  isEmailVerified      Boolean             @default(false)
+  
+  // Reputational metrics
+  reputationScore      Decimal             @default(5.00) @db.Decimal(3, 2)
+  totalSessionsTaught  Int                 @default(0)
+  totalSessionsLearned Int                 @default(0)
+  hoursContributed     Decimal             @default(0.00) @db.Decimal(7, 2)
+
+  // System time-banking balance cache (derived strictly from ledger verification)
+  creditBalance        Decimal             @default(1.00) @db.Decimal(10, 2) // Initial 1 free credit
+  escrowLockedBalance  Decimal             @default(0.00) @db.Decimal(10, 2)
+
+  createdAt            DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime            @updatedAt @db.Timestamptz(6)
+  deletedAt            DateTime?           @db.Timestamptz(6)
+
+  // Relations
+  skillsOffered        UserSkillOffered[]
+  skillsWanted         UserSkillWanted[]
+  sessionsAsTeacher    Session[]           @relation("TeacherSessions")
+  sessionsAsLearner    Session[]           @relation("LearnerSessions")
+  ledgerEntries        LedgerEntry[]
+  reviewsGiven         Review[]            @relation("ReviewAuthor")
+  reviewsReceived      Review[]            @relation("ReviewSubject")
+  disputesRaised       Dispute[]           @relation("DisputeRaiser")
+  badges               UserBadge[]
+
+  @@index([email])
+  @@index([reputationScore(sort: Desc)])
+  @@index([createdAt])
+  @@map("users")
+}
+
+// ---------------------------------------------------------
+// SKILLS & TAXONOMY
+// ---------------------------------------------------------
+
+model SkillCategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique @db.VarChar(100)
+  slug        String   @unique @db.VarChar(100)
+  description String?  @db.VarChar(500)
+  skills      Skill[]
+
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  @@map("skill_categories")
+}
+
+model Skill {
+  id          String             @id @default(uuid()) @db.Uuid
+  categoryId  String             @db.Uuid
+  name        String             @unique @db.VarChar(100)
+  slug        String             @unique @db.VarChar(100)
+  description String?            @db.Text
+  category    SkillCategory      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  offeredBy   UserSkillOffered[]
+  wantedBy    UserSkillWanted[]
+  sessions    Session[]
+
+  createdAt   DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime           @updatedAt @db.Timestamptz(6)
+
+  @@index([categoryId])
+  @@map("skills")
+}
+
+model UserSkillOffered {
+  id           String           @id @default(uuid()) @db.Uuid
+  userId       String           @db.Uuid
+  skillId      String           @db.Uuid
+  level        ProficiencyLevel @default(INTERMEDIATE)
+  yearsOfExp   Int              @default(1)
+  description  String?          @db.Text
+  isVerified   Boolean          @default(false)
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill        Skill            @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime         @updatedAt @db.Timestamptz(6)
+
+  @@unique([userId, skillId])
+  @@index([skillId, level])
+  @@map("user_skills_offered")
+}
+
+model UserSkillWanted {
+  id           String           @id @default(uuid()) @db.Uuid
+  userId       String           @db.Uuid
+  skillId      String           @db.Uuid
+  targetLevel  ProficiencyLevel @default(INTERMEDIATE)
+  notes        String?          @db.Text
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill        Skill            @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime         @updatedAt @db.Timestamptz(6)
+
+  @@unique([userId, skillId])
+  @@index([skillId])
+  @@map("user_skills_wanted")
+}
+
+// ---------------------------------------------------------
+// SESSIONS & PEER LEARNING BOOKINGS
+// ---------------------------------------------------------
+
+model Session {
+  id               String          @id @default(uuid()) @db.Uuid
+  teacherId        String          @db.Uuid
+  learnerId        String          @db.Uuid
+  skillId          String          @db.Uuid
+  status           SessionStatus   @default(REQUESTED)
+  
+  // Meeting details
+  scheduledStartAt DateTime        @db.Timestamptz(6)
+  scheduledEndAt   DateTime        @db.Timestamptz(6)
+  actualStartAt    DateTime?       @db.Timestamptz(6)
+  actualEndAt      DateTime?       @db.Timestamptz(6)
+  durationHours    Decimal         @db.Decimal(4, 2) // e.g., 1.00 hour = 1.00 credit
+  creditAmount     Decimal         @db.Decimal(10, 2)
+  isDirectSwap     Boolean         @default(false)
+  
+  // Real-time room identifier
+  roomId           String          @unique @default(uuid()) @db.Uuid
+  learnerNotes     String?         @db.Text
+  teacherFeedback  String?         @db.Text
+
+  // Relations
+  teacher          User            @relation("TeacherSessions", fields: [teacherId], references: [id], onDelete: Restrict)
+  learner          User            @relation("LearnerSessions", fields: [learnerId], references: [id], onDelete: Restrict)
+  skill            Skill           @relation(fields: [skillId], references: [id], onDelete: Restrict)
+  ledgerEntries    LedgerEntry[]
+  reviews          Review[]
+  disputes         Dispute[]
+
+  createdAt        DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime        @updatedAt @db.Timestamptz(6)
+
+  @@index([teacherId, status])
+  @@index([learnerId, status])
+  @@index([scheduledStartAt, status])
+  @@index([roomId])
+  @@map("sessions")
+}
+
+// ---------------------------------------------------------
+// TIME-BANK DOUBLE-ENTRY LEDGER
+// ---------------------------------------------------------
+
+model LedgerEntry {
+  id              String          @id @default(uuid()) @db.Uuid
+  transactionId   String          @db.Uuid // Groups the balanced pair of debit & credit entries
+  userId          String?         @db.Uuid // Nullable for Platform Reserve account
+  sessionId       String?         @db.Uuid
+  type            TransactionType
+  direction       LedgerEntryType // DEBIT or CREDIT
+  amount          Decimal         @db.Decimal(10, 2) // Must be positive
+  balanceAfter    Decimal         @db.Decimal(10, 2) // Running balance snapshot
+  description     String          @db.VarChar(255)
+
+  user            User?           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  session         Session?        @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime        @default(now()) @db.Timestamptz(6)
+
+  @@index([transactionId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([sessionId])
+  @@map("ledger_entries")
+}
+
+// ---------------------------------------------------------
+// REVIEWS & DISPUTES
+// ---------------------------------------------------------
+
+model Review {
+  id         String   @id @default(uuid()) @db.Uuid
+  sessionId  String   @db.Uuid
+  authorId   String   @db.Uuid
+  subjectId  String   @db.Uuid
+  rating     Int      @db.SmallInt // 1 to 5 stars
+  feedback   String   @db.Text
+  punctuality Int     @default(5) @db.SmallInt
+  clarity    Int      @default(5) @db.SmallInt
+
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  author     User     @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  subject    User     @relation("ReviewSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([sessionId, authorId])
+  @@index([subjectId, rating])
+  @@map("reviews")
+}
+
+model Dispute {
+  id             String        @id @default(uuid()) @db.Uuid
+  sessionId      String        @db.Uuid
+  raisedById     String        @db.Uuid
+  reason         String        @db.VarChar(200)
+  evidenceText   String        @db.Text
+  status         DisputeStatus @default(OPEN)
+  resolutionNote String?       @db.Text
+  resolvedAt     DateTime?     @db.Timestamptz(6)
+
+  session        Session       @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  raisedBy       User          @relation("DisputeRaiser", fields: [raisedById], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(6)
+
+  @@index([sessionId])
+  @@index([status])
+  @@map("disputes")
+}
+
+model Badge {
+  id          String      @id @default(uuid()) @db.Uuid
+  name        String      @unique @db.VarChar(80)
+  slug        String      @unique @db.VarChar(80)
+  description String      @db.VarChar(255)
+  iconUrl     String      @db.VarChar(512)
+  users       UserBadge[]
+
+  createdAt   DateTime    @default(now()) @db.Timestamptz(6)
+
+  @@map("badges")
+}
+
+model UserBadge {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  badgeId   String   @db.Uuid
+  awardedAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge     Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+  @@map("user_badges")
+}
+

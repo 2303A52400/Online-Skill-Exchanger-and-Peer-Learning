@@ -1,0 +1,215 @@
+name: SkillSwap CI/CD & DevSecOps Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+  packages: write
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BACKEND: ghcr.io/${{ github.repository }}/backend
+  IMAGE_FRONTEND: ghcr.io/${{ github.repository }}/frontend
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Quality & Static Analysis (SAST)
+  # ---------------------------------------------------------------------------
+  lint-and-typecheck:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: |
+            backend/package.json
+            frontend/package.json
+
+      - name: Validate Backend Types & Syntax
+        run: |
+          cd backend
+          npm ci
+          npx prisma generate
+          npx tsc --noEmit
+
+      - name: Validate Frontend Types & Syntax
+        run: |
+          cd frontend
+          npm ci
+          npx tsc --noEmit
+
+      - name: Run Semgrep SAST Scan
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+            p/javascript
+            p/typescript
+          generateSarif: "1"
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # 2. Automated Integration & Unit Testing with Live Test Containers
+  # ---------------------------------------------------------------------------
+  test:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: skillswap_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: backend/package.json
+
+      - name: Run Backend Integration Suite
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/skillswap_test?schema=public
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: |
+          cd backend
+          npm ci
+          npx prisma generate
+          npx prisma db push --skip-generate
+          npm test
+
+  # ---------------------------------------------------------------------------
+  # 3. Docker Image Build, Vulnerability Scan, & ghcr.io Registry Push
+  # ---------------------------------------------------------------------------
+  build-and-scan:
+    name: Build & Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set Image Tag
+        id: vars
+        run: echo "SHA_SHORT=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      # Build Backend Image
+      - name: Build Backend Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          load: true
+          tags: ${{ env.IMAGE_BACKEND }}:${{ steps.vars.outputs.SHA_SHORT }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Scan Backend Image with Trivy
+      - name: Run Trivy Vulnerability Scanner on Backend
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_BACKEND }}:${{ steps.vars.outputs.SHA_SHORT }}
+          format: "table"
+          exit-code: "0"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH"
+
+      # Push Backend Image
+      - name: Push Backend Image to ghcr.io
+        run: |
+          docker tag ${{ env.IMAGE_BACKEND }}:${{ steps.vars.outputs.SHA_SHORT }} ${{ env.IMAGE_BACKEND }}:latest
+          docker push ${{ env.IMAGE_BACKEND }}:${{ steps.vars.outputs.SHA_SHORT }}
+          docker push ${{ env.IMAGE_BACKEND }}:latest
+
+      # Build & Push Frontend Image
+      - name: Build & Push Frontend Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_FRONTEND }}:${{ steps.vars.outputs.SHA_SHORT }}
+            ${{ env.IMAGE_FRONTEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # 4. GitOps Auto-Promotion (Commit Tag to Deployment Repository)
+  # ---------------------------------------------------------------------------
+  gitops-promote:
+    name: GitOps Auto-Promotion
+    runs-on: ubuntu-latest
+    needs: [build-and-scan]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout Deployment / Config Repository
+        uses: actions/checkout@v4
+
+      - name: Set Short SHA
+        id: vars
+        run: echo "SHA_SHORT=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Update Kustomize Manifests with New Image Tag
+        run: |
+          cd k8s/base
+          sed -i "s|image: ghcr.io/skillswap/backend:.*|image: ${{ env.IMAGE_BACKEND }}:${{ steps.vars.outputs.SHA_SHORT }}|g" backend.yaml
+          sed -i "s|image: ghcr.io/skillswap/frontend:.*|image: ${{ env.IMAGE_FRONTEND }}:${{ steps.vars.outputs.SHA_SHORT }}|g" frontend.yaml
+
+      - name: Commit & Push GitOps Release Tag
+        run: |
+          git config --global user.name "gitops-bot[bot]"
+          git config --global user.email "gitops-bot@users.noreply.github.com"
+          git commit -am "chore(gitops): promote release tag ${{ steps.vars.outputs.SHA_SHORT }} to cluster [skip ci]" || echo "No changes to commit"
+          git push
+
