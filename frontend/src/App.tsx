@@ -1,100 +1,266 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { io, Socket } from "socket.io-client";
+import { PlatformUser, IncomingCallData } from "./types";
+import { Navbar } from "./components/Navbar.tsx";
+import { LoginView } from "./components/LoginView.tsx";
+import { SkillsSetupView } from "./components/SkillsSetupView.tsx";
+import { DashboardView } from "./components/DashboardView.tsx";
+import { ProfileModal } from "./components/ProfileModal.tsx";
+import { IncomingCallModal } from "./components/IncomingCallModal.tsx";
 import { PeerLearningRoom } from "./components/PeerLearningRoom.tsx";
 
 export default function App() {
-  const [balance, setBalance] = useState(1.0);
-  const [sessionActive, setSessionActive] = useState(false);
-  const [roomId, setRoomId] = useState("skillswap-room-alpha");
+  const [currentUser, setCurrentUser] = useState<PlatformUser | null>(() => {
+    const saved = localStorage.getItem("skillswap_user");
+    return saved ? JSON.parse(saved) : null;
+  });
 
-  const handleHoldEscrow = () => {
-    if (balance >= 1.0) {
-      setBalance((prev) => prev - 1.0);
-      setSessionActive(true);
+  const [currentView, setCurrentView] = useState<"LOGIN" | "SETUP_SKILLS" | "DASHBOARD" | "ROOM">(() => {
+    const saved = localStorage.getItem("skillswap_user");
+    if (!saved) return "LOGIN";
+    const user = JSON.parse(saved);
+    return user.setupCompleted ? "DASHBOARD" : "SETUP_SKILLS";
+  });
+
+  const [peers, setPeers] = useState<PlatformUser[]>([]);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+
+  // Modals & Calls
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<IncomingCallData | null>(null);
+  const [callingPeerId, setCallingPeerId] = useState<string | null>(null);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [activePeer, setActivePeer] = useState<PlatformUser | null>(null);
+
+  // -------------------------------------------------------------
+  // 1. Socket.io Connection & Event Listeners
+  // -------------------------------------------------------------
+  useEffect(() => {
+    const socketInstance = io(window.location.origin, {
+      transports: ["websocket", "polling"],
+      reconnectionAttempts: 10,
+    });
+
+    socketInstance.on("connect", () => {
+      setIsConnected(true);
+      if (currentUser) {
+        socketInstance.emit("register-user", {
+          userId: currentUser.id,
+          userName: currentUser.fullName,
+        });
+      }
+    });
+
+    socketInstance.on("disconnect", () => {
+      setIsConnected(false);
+    });
+
+    // Incoming Call Notification
+    socketInstance.on("incoming-call", (callData: IncomingCallData) => {
+      setIncomingCall(callData);
+    });
+
+    // Call Accepted by Peer
+    socketInstance.on("call-accepted", ({ roomId }: { roomId: string }) => {
+      setCallingPeerId(null);
+      setActiveRoomId(roomId);
+      setCurrentView("ROOM");
+    });
+
+    // Call Declined
+    socketInstance.on("call-declined", ({ message }: { message: string }) => {
+      setCallingPeerId(null);
+      alert(message || "Peer declined connection.");
+    });
+
+    // Call Failed
+    socketInstance.on("call-failed", ({ message }: { message: string }) => {
+      setCallingPeerId(null);
+      alert(message || "User is currently offline.");
+    });
+
+    // User online status changes in real-time
+    socketInstance.on("user-status-changed", ({ userId, isOnline }: { userId: string; isOnline: boolean }) => {
+      setPeers((prev) =>
+        prev.map((p) => (p.id === userId ? { ...p, isOnline } : p))
+      );
+    });
+
+    setSocket(socketInstance);
+
+    return () => {
+      socketInstance.disconnect();
+    };
+  }, [currentUser?.id]);
+
+  // -------------------------------------------------------------
+  // 2. Fetch Active Community Peers
+  // -------------------------------------------------------------
+  const fetchPeers = async () => {
+    try {
+      const url = currentUser ? `/api/v1/peers?excludeUserId=${currentUser.id}` : "/api/v1/peers";
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setPeers(data.peers || []);
+      }
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchPeers();
+    }
+  }, [currentUser?.id]);
+
+  // -------------------------------------------------------------
+  // 3. User Authentication Handlers
+  // -------------------------------------------------------------
+  const handleLoginSuccess = (user: PlatformUser, isNewUser: boolean) => {
+    setCurrentUser(user);
+    localStorage.setItem("skillswap_user", JSON.stringify(user));
+
+    if (socket) {
+      socket.emit("register-user", {
+        userId: user.id,
+        userName: user.fullName,
+      });
+    }
+
+    if (isNewUser || !user.setupCompleted) {
+      setCurrentView("SETUP_SKILLS");
     } else {
-      alert("Insufficient time credits! Earn credits by teaching first.");
+      setCurrentView("DASHBOARD");
     }
   };
 
-  const handleLeaveSession = () => {
-    setSessionActive(false);
+  const handleSetupComplete = (updatedUser: PlatformUser) => {
+    setCurrentUser(updatedUser);
+    localStorage.setItem("skillswap_user", JSON.stringify(updatedUser));
+    setCurrentView("DASHBOARD");
+    fetchPeers();
   };
 
+  const handleProfileUpdated = (updatedUser: PlatformUser) => {
+    setCurrentUser(updatedUser);
+    localStorage.setItem("skillswap_user", JSON.stringify(updatedUser));
+    fetchPeers();
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("skillswap_user");
+    setCurrentUser(null);
+    setCurrentView("LOGIN");
+  };
+
+  // -------------------------------------------------------------
+  // 4. Peer Connection & Call Handling
+  // -------------------------------------------------------------
+  const handleConnectWithPeer = (peer: PlatformUser, skillName: string) => {
+    if (!socket || !currentUser) return;
+    setCallingPeerId(peer.id);
+    setActivePeer(peer);
+
+    socket.emit("call-user", {
+      toUserId: peer.id,
+      fromUser: {
+        id: currentUser.id,
+        fullName: currentUser.fullName,
+        headline: currentUser.headline,
+        avatarUrl: currentUser.avatarUrl,
+        skillsOffered: currentUser.skillsOffered,
+      },
+      requestedSkill: skillName,
+    });
+  };
+
+  const handleAcceptCall = (roomId: string, callerUserId: string) => {
+    if (!socket) return;
+    socket.emit("accept-call", { roomId, callerUserId });
+    setActiveRoomId(roomId);
+    setIncomingCall(null);
+    setCurrentView("ROOM");
+  };
+
+  const handleDeclineCall = (callerUserId: string) => {
+    if (!socket) return;
+    socket.emit("decline-call", { callerUserId });
+    setIncomingCall(null);
+  };
+
+  const handleLeaveRoom = () => {
+    if (socket && activeRoomId) {
+      socket.emit("leave-room", { roomId: activeRoomId });
+    }
+    setActiveRoomId(null);
+    setActivePeer(null);
+    setCurrentView("DASHBOARD");
+  };
+
+  // -------------------------------------------------------------
+  // 5. Render View Flow
+  // -------------------------------------------------------------
+  if (currentView === "LOGIN" || !currentUser) {
+    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  if (currentView === "SETUP_SKILLS") {
+    return (
+      <SkillsSetupView
+        user={currentUser}
+        onSetupComplete={handleSetupComplete}
+      />
+    );
+  }
+
   return (
-    <div style={{ fontFamily: "sans-serif", padding: "2rem", maxWidth: "1000px", margin: "0 auto" }}>
-      <header style={{ borderBottom: "1px solid #334155", paddingBottom: "1rem", marginBottom: "2rem" }}>
-        <h1 style={{ color: "#38bdf8", margin: 0 }}>SkillSwap Peer Learning Platform</h1>
-        <p style={{ color: "#94a3b8" }}>Time-Banking & Direct Reciprocal Skill Exchange</p>
-      </header>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
+      {/* Top Navbar with Profile Logo at Top-Left */}
+      <Navbar
+        user={currentUser}
+        onOpenProfile={() => setIsProfileOpen(true)}
+        onLogout={handleLogout}
+        isConnected={isConnected}
+      />
 
-      {!sessionActive ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem" }}>
-          <div style={{ border: "1px solid #334155", borderRadius: "8px", padding: "1.5rem", background: "#1e293b" }}>
-            <h2>Time-Bank Credit Balance</h2>
-            <div style={{ fontSize: "2.5rem", fontWeight: "bold", color: "#38bdf8", margin: "1rem 0" }}>
-              {balance.toFixed(2)} Credits
-            </div>
-            <p style={{ color: "#94a3b8" }}>1 Hour Taught = 1 Learning Credit</p>
-            <button
-              onClick={() => setBalance((prev) => prev + 1.0)}
-              style={{
-                backgroundColor: "#2563eb",
-                color: "#fff",
-                border: "none",
-                padding: "0.5rem 1rem",
-                borderRadius: "6px",
-                cursor: "pointer",
-                marginTop: "0.5rem",
-              }}
-            >
-              + Simulate Teaching 1 Hour
-            </button>
-          </div>
+      {/* Main Content Area */}
+      <main className="flex-1">
+        {currentView === "DASHBOARD" && (
+          <DashboardView
+            currentUser={currentUser}
+            peers={peers}
+            onConnectWithPeer={handleConnectWithPeer}
+            onRefreshPeers={fetchPeers}
+            callingPeerId={callingPeerId}
+          />
+        )}
 
-          <div style={{ border: "1px solid #334155", borderRadius: "8px", padding: "1.5rem", background: "#1e293b" }}>
-            <h2>1-on-1 Video Session</h2>
-            <p style={{ color: "#94a3b8" }}>WebRTC Video, Audio & Collaborative Whiteboard</p>
-            <div style={{ margin: "1rem 0" }}>
-              <label style={{ display: "block", marginBottom: "0.25rem", color: "#cbd5e1" }}>Room Identifier:</label>
-              <input
-                type="text"
-                value={roomId}
-                onChange={(e) => setRoomId(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.5rem",
-                  background: "#0f172a",
-                  border: "1px solid #334155",
-                  borderRadius: "4px",
-                  color: "#fff",
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
-            <button
-              onClick={handleHoldEscrow}
-              style={{
-                backgroundColor: "#10b981",
-                color: "#fff",
-                border: "none",
-                padding: "0.75rem 1.5rem",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontWeight: 600,
-                width: "100%",
-              }}
-            >
-              Escrow 1 Credit & Join Room
-            </button>
-          </div>
-        </div>
-      ) : (
-        <PeerLearningRoom
-          roomId={roomId}
-          userId="user-test-learner-1"
-          userName="Alex Rivera"
-          onLeave={handleLeaveSession}
-        />
-      )}
+        {currentView === "ROOM" && activeRoomId && (
+          <PeerLearningRoom
+            socket={socket}
+            roomId={activeRoomId}
+            currentUser={currentUser}
+            peerUser={activePeer}
+            onLeave={handleLeaveRoom}
+          />
+        )}
+      </main>
+
+      {/* Top-Left Profile Logo Edit Modal */}
+      <ProfileModal
+        user={currentUser}
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        onProfileUpdated={handleProfileUpdated}
+      />
+
+      {/* Incoming Call Notification Pop-Up */}
+      <IncomingCallModal
+        callData={incomingCall}
+        onAccept={handleAcceptCall}
+        onDecline={handleDeclineCall}
+      />
     </div>
   );
 }

@@ -71,6 +71,7 @@ model User {
   email                String              @unique @db.VarChar(255)
   passwordHash         String?             @db.VarChar(255) // Optional if OAuth2-only
   fullName             String              @db.VarChar(120)
+  mobileNumber         String?             @db.VarChar(32)
   headline             String?             @db.VarChar(200)
   bio                  String?             @db.Text
   avatarUrl            String?             @db.VarChar(512)

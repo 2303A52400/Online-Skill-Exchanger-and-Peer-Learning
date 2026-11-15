@@ -12,6 +12,7 @@ export const config = {
     host: process.env.REDIS_HOST || "localhost",
     port: parseInt(process.env.REDIS_PORT || "6379", 10),
     password: process.env.REDIS_PASSWORD || undefined,
+    enabled: process.env.ENABLE_REDIS === "true",
   },
   corsOrigin: process.env.CORS_ORIGIN || "http://localhost:3000",
   logLevel: process.env.LOG_LEVEL || "info",
