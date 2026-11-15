@@ -139,7 +139,7 @@ export function DashboardView({
             </span>
             <ol className="text-xs text-slate-300 space-y-1.5 list-decimal list-inside">
               <li>Open a <strong className="text-white">new browser window or Incognito tab</strong>.</li>
-              <li>Go to <code className="text-emerald-300 bg-slate-900 px-1 py-0.5 rounded">http://localhost:3000</code>.</li>
+              <li>Go to <code className="text-emerald-300 bg-slate-900 px-1 py-0.5 rounded">{typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"}</code>.</li>
               <li>Log in with a second user name, email, and mobile number.</li>
               <li>Add their skills — both users will instantly appear on each other's dashboard with the <span className="text-emerald-400 font-semibold">green light</span>!</li>
               <li>Click the green <span className="text-emerald-400 font-semibold">Connect</span> button to start a live 1-on-1 session.</li>

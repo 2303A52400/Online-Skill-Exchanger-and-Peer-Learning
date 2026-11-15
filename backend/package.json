@@ -4,7 +4,7 @@
   "description": "SkillSwap Peer Learning & Time-Banking API Engine",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "prisma generate && tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "lint": "eslint src/**/*.ts",
