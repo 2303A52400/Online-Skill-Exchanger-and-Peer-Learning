@@ -124,12 +124,35 @@ export function DashboardView({
 
       {/* Community Peer List Grid */}
       {filteredPeers.length === 0 ? (
-        <div className="text-center py-16 bg-slate-900/40 rounded-3xl border border-slate-800/80 p-8">
-          <Users className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-lg font-bold text-white mb-1">No Peers Found</h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            Try adjusting your search query or check back as more community members join!
+        <div className="text-center py-16 bg-slate-900/60 rounded-3xl border border-slate-800 p-8 max-w-xl mx-auto shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-950/70 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
+            <Users className="w-8 h-8 text-emerald-400" />
+          </div>
+          <h3 className="text-xl font-bold text-white mb-2">No Other Logged-in Users Yet</h3>
+          <p className="text-xs text-slate-300 leading-relaxed mb-6">
+            All mock profiles have been completely removed! Currently, only <strong className="text-emerald-400">real users who have logged in</strong> and added their skills appear here.
           </p>
+
+          <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 text-left mb-6">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
+              💡 How to Test Real-Time Connection with another user:
+            </span>
+            <ol className="text-xs text-slate-300 space-y-1.5 list-decimal list-inside">
+              <li>Open a <strong className="text-white">new browser window or Incognito tab</strong>.</li>
+              <li>Go to <code className="text-emerald-300 bg-slate-900 px-1 py-0.5 rounded">http://localhost:3000</code>.</li>
+              <li>Log in with a second user name, email, and mobile number.</li>
+              <li>Add their skills — both users will instantly appear on each other's dashboard with the <span className="text-emerald-400 font-semibold">green light</span>!</li>
+              <li>Click the green <span className="text-emerald-400 font-semibold">Connect</span> button to start a live 1-on-1 session.</li>
+            </ol>
+          </div>
+
+          <button
+            onClick={() => window.open(window.location.origin, "_blank")}
+            className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg shadow-emerald-500/25 transition-all inline-flex items-center gap-2"
+          >
+            <span>Open New Peer Tab (Incognito recommended)</span>
+            <ArrowUpRight className="w-4 h-4" />
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

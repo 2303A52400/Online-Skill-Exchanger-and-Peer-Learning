@@ -97,6 +97,7 @@ export function setupSignalingGateway(httpServer: HttpServer, userStore?: UserSt
 
       // Broadcast to other peers that this user is online (green light)
       socket.broadcast.emit("user-status-changed", { userId, isOnline: true });
+      io.emit("peers-updated");
       logger.info({ userId, userName, socketId: socket.id }, "User registered socket for real-time peer calls");
     });
 
@@ -281,6 +282,7 @@ export function setupSignalingGateway(httpServer: HttpServer, userStore?: UserSt
           userStore.setUserOnline(userId, false);
         }
         socket.broadcast.emit("user-status-changed", { userId, isOnline: false });
+        io.emit("peers-updated");
       }
 
       for (const room of socket.rooms) {

@@ -27,130 +27,13 @@ export interface PlatformUser {
   createdAt: string;
 }
 
-// Default community peers available for instant skill-swapping
-const INITIAL_COMMUNITY_PEERS: PlatformUser[] = [
-  {
-    id: "peer-elena-k8s",
-    fullName: "Elena Rostova",
-    email: "elena.rostova@example.com",
-    mobileNumber: "+1 (555) 234-5678",
-    headline: "Staff Cloud & Kubernetes Architect",
-    bio: "Passionate about container orchestration, GitOps, and high-availability distributed systems.",
-    avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
-    timeZone: "UTC+1 (Berlin)",
-    creditBalance: 4.0,
-    reputationScore: 4.98,
-    totalSessionsTaught: 24,
-    skillsOffered: [
-      { name: "Kubernetes Orchestration", level: "EXPERT", category: "DevOps" },
-      { name: "Docker & Container Security", level: "EXPERT", category: "DevOps" },
-      { name: "Terraform IaC", level: "ADVANCED", category: "Cloud" },
-    ],
-    skillsWanted: ["React.js", "WebRTC Video", "TypeScript"],
-    isOnline: true,
-    setupCompleted: true,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "peer-marcus-react",
-    fullName: "Marcus Vance",
-    email: "marcus.vance@example.com",
-    mobileNumber: "+1 (555) 345-6789",
-    headline: "Senior Frontend Engineer & React Specialist",
-    bio: "Specializing in React 18 concurrent UI, WebRTC media streams, and collaborative canvases.",
-    avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-    timeZone: "UTC-5 (New York)",
-    creditBalance: 3.5,
-    reputationScore: 4.92,
-    totalSessionsTaught: 19,
-    skillsOffered: [
-      { name: "React 18 & Vite", level: "EXPERT", category: "Frontend" },
-      { name: "WebRTC Audio/Video", level: "ADVANCED", category: "Realtime" },
-      { name: "Tailwind CSS & UI Systems", level: "EXPERT", category: "Design" },
-    ],
-    skillsWanted: ["Kubernetes", "PostgreSQL Optimization"],
-    isOnline: true,
-    setupCompleted: true,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "peer-priya-ai",
-    fullName: "Priya Sharma",
-    email: "priya.sharma@example.com",
-    mobileNumber: "+91 98765 43210",
-    headline: "AI Research Engineer & Python Lead",
-    bio: "Hands-on experience fine-tuning LLMs, PyTorch computer vision, and building agentic workflows.",
-    avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-    timeZone: "UTC+5:30 (India)",
-    creditBalance: 5.0,
-    reputationScore: 5.0,
-    totalSessionsTaught: 31,
-    skillsOffered: [
-      { name: "Python for Data Science", level: "EXPERT", category: "AI/ML" },
-      { name: "LLM Agents & Prompt Engineering", level: "EXPERT", category: "AI/ML" },
-      { name: "FastAPI & Microservices", level: "ADVANCED", category: "Backend" },
-    ],
-    skillsWanted: ["System Design", "Cloud Architecture"],
-    isOnline: true,
-    setupCompleted: true,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "peer-david-design",
-    fullName: "David Kim",
-    email: "david.kim@example.com",
-    mobileNumber: "+1 (555) 789-0123",
-    headline: "Product Designer & UX Researcher",
-    bio: "Figma master, design systems architect, and usability tester with 7+ years craft.",
-    avatarUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
-    timeZone: "UTC-8 (San Francisco)",
-    creditBalance: 2.0,
-    reputationScore: 4.87,
-    totalSessionsTaught: 14,
-    skillsOffered: [
-      { name: "Figma Component Systems", level: "EXPERT", category: "Design" },
-      { name: "UX Research & Wireframing", level: "EXPERT", category: "Design" },
-      { name: "Interactive Prototyping", level: "ADVANCED", category: "Design" },
-    ],
-    skillsWanted: ["Next.js", "Tailwind CSS"],
-    isOnline: true,
-    setupCompleted: true,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "peer-sarah-backend",
-    fullName: "Sarah Jenkins",
-    email: "sarah.jenkins@example.com",
-    mobileNumber: "+44 20 7946 0912",
-    headline: "Distributed Systems & Node.js Architect",
-    bio: "Passionate about event-driven architecture, Redis Pub/Sub, and robust database indexing.",
-    avatarUrl: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
-    timeZone: "UTC+0 (London)",
-    creditBalance: 3.0,
-    reputationScore: 4.95,
-    totalSessionsTaught: 22,
-    skillsOffered: [
-      { name: "Node.js & Express", level: "EXPERT", category: "Backend" },
-      { name: "PostgreSQL Database Design", level: "ADVANCED", category: "Database" },
-      { name: "Redis Caching & PubSub", level: "ADVANCED", category: "Backend" },
-    ],
-    skillsWanted: ["Figma UI/UX", "Mobile Development"],
-    isOnline: true,
-    setupCompleted: true,
-    createdAt: new Date().toISOString(),
-  },
-];
-
 export class UserStore {
+  // Purely dynamic store: holds only actual users who have logged in
   private users: Map<string, PlatformUser> = new Map();
   private onlineUserIds: Set<string> = new Set();
 
   constructor(private prisma: PrismaClient) {
-    // Populate in-memory map with initial community peers
-    for (const peer of INITIAL_COMMUNITY_PEERS) {
-      this.users.set(peer.id, peer);
-      this.onlineUserIds.add(peer.id);
-    }
+    logger.info("UserStore initialized with zero dummy profiles. Only real logged-in users are displayed.");
   }
 
   async quickLogin(fullName: string, email: string, mobileNumber: string): Promise<{ user: PlatformUser; isNewUser: boolean }> {
@@ -219,7 +102,7 @@ export class UserStore {
       }
     } catch (_) {}
 
-    // 3. Create fresh user
+    // 3. Create fresh actual user
     const newUserId = uuidv4();
     const newUser: PlatformUser = {
       id: newUserId,
@@ -342,7 +225,9 @@ export class UserStore {
     const list: PlatformUser[] = [];
     for (const [id, user] of this.users.entries()) {
       if (excludeUserId && id === excludeUserId) continue;
-      // Mark online status dynamically
+      // Only include actual registered users who have completed their setup
+      if (!user.setupCompleted || user.skillsOffered.length === 0) continue;
+
       list.push({
         ...user,
         isOnline: this.onlineUserIds.has(id),
@@ -363,4 +248,3 @@ export class UserStore {
     }
   }
 }
-

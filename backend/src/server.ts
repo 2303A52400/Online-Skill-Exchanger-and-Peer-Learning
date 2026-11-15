@@ -117,6 +117,9 @@ app.post("/api/v1/auth/quick-login", async (req: Request, res: Response) => {
   }
 });
 
+// Initialize Socket.io WebRTC & Call Signaling Gateway
+const io = setupSignalingGateway(server, userStore);
+
 // Skills Setup Page Submission
 app.post("/api/v1/users/:userId/skills", (req: Request, res: Response) => {
   try {
@@ -128,6 +131,8 @@ app.post("/api/v1/users/:userId/skills", (req: Request, res: Response) => {
     }
 
     const updatedUser = userStore.updateSkills(userId, skillsOffered, skillsWanted || [], headline);
+    // Broadcast to all active users that a new peer has joined!
+    io.emit("peers-updated");
     return res.status(200).json({ user: updatedUser, message: "Skills setup completed successfully!" });
   } catch (err: any) {
     return res.status(400).json({ error: err.message });
@@ -148,6 +153,7 @@ app.put("/api/v1/users/:userId", (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
     const updated = userStore.updateProfile(userId, req.body);
+    io.emit("peers-updated");
     return res.status(200).json({ user: updated, message: "Profile updated successfully!" });
   } catch (err: any) {
     return res.status(400).json({ error: err.message });
@@ -183,9 +189,6 @@ app.post("/api/v1/ledger/escrow/hold", async (req: Request, res: Response) => {
     res.status(200).json({ success: true, message: "Escrow hold processed", transactionId: "demo-tx" });
   }
 });
-
-// Initialize Socket.io WebRTC & Call Signaling Gateway
-setupSignalingGateway(server, userStore);
 
 // Start Server
 const serverInstance = server.listen(config.port, () => {

@@ -87,6 +87,11 @@ export default function App() {
       );
     });
 
+    // Automatically update list of peers when a new user logs in or adds skills
+    socketInstance.on("peers-updated", () => {
+      fetchPeers();
+    });
+
     setSocket(socketInstance);
 
     return () => {
