@@ -46,6 +46,7 @@ export default function App() {
       setIsConnected(true);
       if (currentUser) {
         socketInstance.emit("register-user", {
+          user: currentUser,
           userId: currentUser.id,
           userName: currentUser.fullName,
         });
@@ -115,7 +116,17 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
+      // Sync user profile to backend to ensure disk persistence
+      fetch("/api/v1/users/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: currentUser }),
+      }).then(() => fetchPeers()).catch(() => {});
+
+      // Periodically refresh peers list
       fetchPeers();
+      const interval = setInterval(fetchPeers, 4000);
+      return () => clearInterval(interval);
     }
   }, [currentUser?.id]);
 
@@ -128,10 +139,18 @@ export default function App() {
 
     if (socket) {
       socket.emit("register-user", {
+        user,
         userId: user.id,
         userName: user.fullName,
       });
     }
+
+    // Immediately sync to server
+    fetch("/api/v1/users/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user }),
+    }).then(() => fetchPeers()).catch(() => {});
 
     if (isNewUser || !user.setupCompleted) {
       setCurrentView("SETUP_SKILLS");

@@ -1,0 +1,81 @@
+[
+  {
+    "id": "728dd204-d41c-4bc6-a882-f84f319aa35a",
+    "fullName": "DAYYALA VIDHU SREE",
+    "email": "2303a52400@sru.edu.in",
+    "mobileNumber": "+91 81219 33694",
+    "headline": "Skill Enthusiast & Peer Mentor",
+    "bio": "Excited to share knowledge and learn from peers!",
+    "avatarUrl": "https://api.dicebear.com/8.x/identicon/svg?seed=DAYYALA%20VIDHU%20SREE",
+    "timeZone": "Asia/Calcutta",
+    "creditBalance": 1,
+    "reputationScore": 5,
+    "totalSessionsTaught": 0,
+    "skillsOffered": [
+      {
+        "name": "Web Development",
+        "level": "INTERMEDIATE",
+        "category": "Tech"
+      },
+      {
+        "name": "Data Structures & Algo",
+        "level": "INTERMEDIATE",
+        "category": "Skills"
+      },
+      {
+        "name": "Python",
+        "level": "INTERMEDIATE",
+        "category": "Skills"
+      },
+      {
+        "name": "Kubernetes",
+        "level": "INTERMEDIATE",
+        "category": "Skills"
+      }
+    ],
+    "skillsWanted": [
+      "Kubernetes",
+      "Cyber Security"
+    ],
+    "isOnline": true,
+    "setupCompleted": true,
+    "createdAt": "2026-11-16T04:51:20.906Z"
+  },
+  {
+    "id": "711025c6-5607-498e-9cd9-64d8e4bf449c",
+    "fullName": "Vemula Alok",
+    "email": "alok.vemula@example.com",
+    "mobileNumber": "+91 99887 76655",
+    "headline": "Full-Stack Engineer & Real-Time Peer Learner",
+    "bio": "Specializing in React, WebRTC video streaming, and Python microservices.",
+    "avatarUrl": "https://api.dicebear.com/8.x/identicon/svg?seed=Vemula%20Alok",
+    "timeZone": "Asia/Calcutta",
+    "creditBalance": 2,
+    "reputationScore": 5,
+    "totalSessionsTaught": 3,
+    "skillsOffered": [
+      {
+        "name": "React.js & TypeScript",
+        "level": "ADVANCED",
+        "category": "Frontend"
+      },
+      {
+        "name": "WebRTC Video & Audio",
+        "level": "ADVANCED",
+        "category": "Realtime"
+      },
+      {
+        "name": "Python Backend",
+        "level": "INTERMEDIATE",
+        "category": "Backend"
+      }
+    ],
+    "skillsWanted": [
+      "Kubernetes Orchestration",
+      "Cloud Architecture"
+    ],
+    "isOnline": false,
+    "setupCompleted": true,
+    "createdAt": "2026-11-15T18:46:41.558Z"
+  }
+]

@@ -85,14 +85,18 @@ export function setupSignalingGateway(httpServer: HttpServer, userStore?: UserSt
     logger.info({ socketId: socket.id }, "Client connected to Signaling Gateway");
 
     // 1. User Registration on Socket Connection
-    socket.on("register-user", ({ userId, userName }: { userId: string; userName: string }) => {
+    socket.on("register-user", ({ user, userId, userName }: { user?: any; userId: string; userName: string }) => {
       userSocketMap.set(userId, socket.id);
       socketUserMap.set(socket.id, userId);
       socket.data.userId = userId;
       socket.data.userName = userName;
 
       if (userStore) {
-        userStore.setUserOnline(userId, true);
+        if (user) {
+          userStore.syncUser(user);
+        } else {
+          userStore.setUserOnline(userId, true);
+        }
       }
 
       // Broadcast to other peers that this user is online (green light)

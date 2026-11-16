@@ -24,7 +24,9 @@ export function DashboardView({
 
   // Filter peers by search query and skills
   const filteredPeers = peers.filter((peer) => {
-    if (peer.id === currentUser.id) return false;
+    if (!peer || !peer.id) return false;
+    if (peer.id.toLowerCase().trim() === currentUser.id.toLowerCase().trim()) return false;
+    if (peer.email && currentUser.email && peer.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) return false;
 
     const matchesSearch =
       peer.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||

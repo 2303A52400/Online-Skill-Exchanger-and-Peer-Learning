@@ -1,6 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import { v4 as uuidv4 } from "uuid";
+import fs from "fs";
+import path from "path";
 import { logger } from "../config/index.js";
+
+const DATA_DIR = path.resolve(process.cwd(), "data");
+const STORE_FILE = path.join(DATA_DIR, "users-store.json");
 
 export interface UserSkillItem {
   name: string;
@@ -28,27 +33,63 @@ export interface PlatformUser {
 }
 
 export class UserStore {
-  // Purely dynamic store: holds only actual users who have logged in
   private users: Map<string, PlatformUser> = new Map();
   private onlineUserIds: Set<string> = new Set();
 
   constructor(private prisma: PrismaClient) {
-    logger.info("UserStore initialized with zero dummy profiles. Only real logged-in users are displayed.");
+    this.ensureDataDir();
+    this.loadFromDisk();
+    logger.info(`UserStore initialized. Currently holding ${this.users.size} persisted user profile(s).`);
+  }
+
+  private ensureDataDir() {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+    } catch (e: any) {
+      logger.warn({ err: e.message }, "Could not create data directory for user store");
+    }
+  }
+
+  private loadFromDisk() {
+    try {
+      if (fs.existsSync(STORE_FILE)) {
+        const raw = fs.readFileSync(STORE_FILE, "utf-8");
+        const list: PlatformUser[] = JSON.parse(raw);
+        for (const u of list) {
+          // Default online to false on boot until socket connects
+          this.users.set(u.id, { ...u, isOnline: false });
+        }
+        logger.info(`Loaded ${list.length} user(s) from persistent disk storage (${STORE_FILE})`);
+      }
+    } catch (e: any) {
+      logger.warn({ err: e.message }, "Failed to read users from disk storage");
+    }
+  }
+
+  private saveToDisk() {
+    try {
+      this.ensureDataDir();
+      const list = Array.from(this.users.values());
+      fs.writeFileSync(STORE_FILE, JSON.stringify(list, null, 2), "utf-8");
+    } catch (e: any) {
+      logger.warn({ err: e.message }, "Failed to persist users to disk storage");
+    }
   }
 
   async quickLogin(fullName: string, email: string, mobileNumber: string): Promise<{ user: PlatformUser; isNewUser: boolean }> {
     const normalizedEmail = email.toLowerCase().trim();
 
-    // 1. Search in memory
+    // 1. Search in memory / disk cache
     for (const u of this.users.values()) {
       if (u.email.toLowerCase() === normalizedEmail) {
-        // Update name and mobile if changed
         u.fullName = fullName.trim() || u.fullName;
         u.mobileNumber = mobileNumber.trim() || u.mobileNumber;
         u.isOnline = true;
         this.onlineUserIds.add(u.id);
+        this.saveToDisk();
 
-        // Try updating in Prisma if connected
         try {
           await this.prisma.user.update({
             where: { email: normalizedEmail },
@@ -63,7 +104,7 @@ export class UserStore {
       }
     }
 
-    // 2. Try looking up in Prisma DB
+    // 2. Search in Prisma DB
     try {
       const dbUser = await this.prisma.user.findUnique({
         where: { email: normalizedEmail },
@@ -98,6 +139,7 @@ export class UserStore {
 
         this.users.set(u.id, u);
         this.onlineUserIds.add(u.id);
+        this.saveToDisk();
         return { user: u, isNewUser: !u.setupCompleted };
       }
     } catch (_) {}
@@ -113,7 +155,7 @@ export class UserStore {
       bio: "Excited to share knowledge and learn from peers!",
       avatarUrl: `https://api.dicebear.com/8.x/identicon/svg?seed=${encodeURIComponent(fullName)}`,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-      creditBalance: 1.0, // Initial 1 free learning credit
+      creditBalance: 1.0,
       reputationScore: 5.0,
       totalSessionsTaught: 0,
       skillsOffered: [],
@@ -125,8 +167,8 @@ export class UserStore {
 
     this.users.set(newUser.id, newUser);
     this.onlineUserIds.add(newUser.id);
+    this.saveToDisk();
 
-    // Persist to Postgres if available
     try {
       await this.prisma.user.create({
         data: {
@@ -142,10 +184,30 @@ export class UserStore {
       });
       logger.info({ userId: newUser.id }, "User synced to PostgreSQL database");
     } catch (e: any) {
-      logger.debug({ err: e.message }, "Prisma DB offline, user saved in high-speed memory store");
+      logger.debug({ err: e.message }, "Prisma DB offline, user saved in persistent disk store");
     }
 
     return { user: newUser, isNewUser: true };
+  }
+
+  syncUser(user: PlatformUser): PlatformUser {
+    if (!user || !user.id) return user;
+
+    const existing = this.users.get(user.id);
+    const merged: PlatformUser = {
+      ...(existing || {}),
+      ...user,
+      skillsOffered: user.skillsOffered && user.skillsOffered.length > 0 ? user.skillsOffered : (existing?.skillsOffered || []),
+      skillsWanted: user.skillsWanted && user.skillsWanted.length > 0 ? user.skillsWanted : (existing?.skillsWanted || []),
+      isOnline: true,
+      setupCompleted: user.setupCompleted ?? (existing?.setupCompleted ?? true),
+    };
+
+    this.users.set(user.id, merged);
+    this.onlineUserIds.add(user.id);
+    this.saveToDisk();
+    logger.info({ userId: user.id, fullName: user.fullName }, "User synced into store");
+    return merged;
   }
 
   updateSkills(
@@ -154,9 +216,26 @@ export class UserStore {
     skillsWanted: string[],
     headline?: string
   ): PlatformUser {
-    const user = this.users.get(userId);
+    let user = this.users.get(userId);
     if (!user) {
-      throw new Error(`User with ID ${userId} not found`);
+      user = {
+        id: userId,
+        fullName: "Peer User",
+        email: "user@example.com",
+        mobileNumber: "",
+        headline: headline || "Peer Mentor",
+        avatarUrl: `https://api.dicebear.com/8.x/identicon/svg?seed=${userId}`,
+        timeZone: "UTC",
+        creditBalance: 1.0,
+        reputationScore: 5.0,
+        totalSessionsTaught: 0,
+        skillsOffered: [],
+        skillsWanted: [],
+        isOnline: true,
+        setupCompleted: true,
+        createdAt: new Date().toISOString(),
+      };
+      this.users.set(userId, user);
     }
 
     const normalizedOffered: UserSkillItem[] = skillsOffered.map((s) => {
@@ -176,22 +255,11 @@ export class UserStore {
     user.skillsWanted = normalizedWanted;
     if (headline) user.headline = headline;
     user.setupCompleted = true;
+    user.isOnline = true;
+    this.onlineUserIds.add(userId);
 
-    // Async DB update if possible
-    this.syncSkillsToDatabase(user).catch(() => {});
-
+    this.saveToDisk();
     return user;
-  }
-
-  private async syncSkillsToDatabase(user: PlatformUser) {
-    try {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: {
-          headline: user.headline,
-        },
-      });
-    } catch (_) {}
   }
 
   updateProfile(userId: string, updates: Partial<PlatformUser>): PlatformUser {
@@ -201,6 +269,7 @@ export class UserStore {
     }
 
     Object.assign(user, updates);
+    this.saveToDisk();
 
     try {
       this.prisma.user.update({
@@ -223,13 +292,21 @@ export class UserStore {
 
   getAllPeers(excludeUserId?: string): PlatformUser[] {
     const list: PlatformUser[] = [];
+    const normalizedExclude = excludeUserId?.toLowerCase().trim();
+
     for (const [id, user] of this.users.entries()) {
-      if (excludeUserId && id === excludeUserId) continue;
-      // Only include actual registered users who have completed their setup
-      if (!user.setupCompleted || user.skillsOffered.length === 0) continue;
+      if (normalizedExclude && id.toLowerCase().trim() === normalizedExclude) {
+        continue;
+      }
+
+      // If user has no skills offered, supply a friendly default so they are always visible
+      const effectiveSkills = user.skillsOffered && user.skillsOffered.length > 0
+        ? user.skillsOffered
+        : [{ name: "Peer Learning & Skill Exchange", level: "INTERMEDIATE" as const, category: "General" }];
 
       list.push({
         ...user,
+        skillsOffered: effectiveSkills,
         isOnline: this.onlineUserIds.has(id),
       });
     }

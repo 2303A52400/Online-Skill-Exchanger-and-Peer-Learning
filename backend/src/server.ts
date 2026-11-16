@@ -120,6 +120,21 @@ app.post("/api/v1/auth/quick-login", async (req: Request, res: Response) => {
 // Initialize Socket.io WebRTC & Call Signaling Gateway
 const io = setupSignalingGateway(server, userStore);
 
+// Sync existing user from localStorage / client
+app.post("/api/v1/users/sync", (req: Request, res: Response) => {
+  try {
+    const { user } = req.body;
+    if (!user || !user.id) {
+      return res.status(400).json({ error: "Valid user object required." });
+    }
+    const synced = userStore.syncUser(user);
+    io.emit("peers-updated");
+    return res.status(200).json({ user: synced });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Skills Setup Page Submission
 app.post("/api/v1/users/:userId/skills", (req: Request, res: Response) => {
   try {
